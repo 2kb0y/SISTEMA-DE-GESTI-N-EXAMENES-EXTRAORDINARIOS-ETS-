@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Consulta de ETS</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css?v=15">
+    <link rel="stylesheet" href="loader.css">
+
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+
+<body>
+
+<!-- SIDEBAR PARA SELECCIONAR ETSs -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        <h3><i class="fas fa-calendar-check"></i> Mi Horario</h3>
+        <button class="sidebar-close" onclick="toggleSidebar()">
+            <i class="fas fa-times"></i>
+        </button>
+    </div>
+    
+    <div class="sidebar-content" id="sidebar-content">
+        <div class="sidebar-empty">
+            <i class="fas fa-inbox"></i>
+            <p>Selecciona ETSs para crear tu horario</p>
+        </div>
+    </div>
+    
+    <div class="sidebar-actions">
+        <button class="btn-horario" onclick="generarHorarioPDF()" id="btn-horario" disabled>
+            <i class="fas fa-calendar"></i> Generar Horario
+        </button>
+        <button class="btn-calendario" onclick="agregarTodoAlCalendario()" id="btn-calendario" disabled>
+            <i class="fas fa-calendar-plus"></i> Agregar al calendario
+        </button>
+        <button class="btn-limpiar" onclick="limpiarSeleccion()" id="btn-limpiar" disabled>
+            <i class="fas fa-trash"></i> Limpiar
+        </button>
+    </div>
+</aside>
+
+<!-- TOGGLE SIDEBAR MOBILE -->
+<button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()">
+    <i class="fas fa-calendar-check"></i>
+    <span id="contador-ets">0</span>
+</button>
+
+<header class="header">
+    <div class="header-content">
+
+        <div class="logo-block">
+            <img src="img/ipn.png" alt="Logo IPN" class="logo logo-ipn">
+        </div>
+
+        <div class="titulo-principal">
+            <div class="eyebrow">Instituto Politécnico Nacional · Escuela Superior de Cómputo</div>
+            <h1>Calendario de ETS Periodo 26/2</h1>
+        </div>
+
+        <div class="logo-block">
+            <img src="img/escom.png" alt="Logo ESCOM" class="logo logo-escom">
+        </div>
+
+    </div>
+</header>
+
+<main class="main">
+
+    <section class="filtros">
+        <div class="filtros-hero">
+            <div>
+                <h2>Consulta de Exámenes a Título de Suficiencia</h2>
+                <p>Filtra por carrera, semestre y materia para ver los ETS disponibles.</p>
+            </div>
+            <button id="buscar" class="btn-buscar">
+                <i class="fas fa-search"></i>
+                Buscar
+            </button>
+        </div>
+
+        <div class="filtros-grid">
+
+            <div class="campo">
+                <label for="carrera"><i class="fas fa-graduation-cap"></i> Carrera</label>
+                <select id="carrera">
+                    <option value="">Seleccione una carrera</option>
+                    <option value="ISC">ISC</option>
+                    <option value="IIA">IIA</option>
+                    <option value="LCD">LCD</option>
+                </select>
+            </div>
+
+            <div class="campo">
+                <label for="semestre"><i class="fas fa-calendar-alt"></i> Semestre</label>
+                <select id="semestre">
+                    <option value="">Seleccione un semestre</option>
+                    <option value="1">1°</option>
+                    <option value="2">2°</option>
+                    <option value="3">3°</option>
+                    <option value="4">4°</option>
+                    <option value="5">5°</option>
+                    <option value="6">6°</option>
+                    <option value="7">7°</option>
+                    <option value="8">8°</option>
+                </select>
+            </div>
+
+            <div class="campo">
+                <label for="materia"><i class="fas fa-book"></i> Materia</label>
+                <input
+                    type="text"
+                    id="materia"
+                    placeholder="Escribe la materia..."
+                >
+            </div>
+        </div>
+    </section>
+
+    <section class="resultados">
+
+        <div id="mensaje-inicial" class="mensaje-inicial">
+            Seleccione una carrera, un semestre y una materia para consultar los ETS disponibles.
+        </div>
+
+        <div id="contenedor-resultados"></div>
+
+    </section>
+
+</main>
+
+<div class="acceso-admin">
+    <a href="admin/login.html" class="btn-admin">
+        <i class="fas fa-cog"></i>
+        Administración
+    </a>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+<script>
+
+const etsDataById = new Map();
+let datosResultados = [];
+let paginaActual = 1;
+const elementosPorPagina = 6;
+const etsSeleccionados = new Set();
+
+console.log("JS cargado");
+
+// FUNCIÓN PARA DETECTAR TRASLAPES DE HORARIO
+function convertirHoraAMinutos(hora) {
+    if (!hora) return null;
+    try {
+        const limpio = hora.trim();
+        const [h, m] = limpio.split(':').map(x => parseInt(x));
+        if (isNaN(h) || isNaN(m)) return null;
+        return h * 60 + m;
+    } catch (e) {
+        console.error('Error al convertir hora:', hora, e);
+        return null;
+    }
+}
+
+function detectarTraslape(uid) {
+    const nuevoExamen = etsDataById.get(uid);
+    if (!nuevoExamen) {
+        console.error('No se encontró examen para UID:', uid);
+        return null;
+    }
+    
+    console.log('Verificando traslape para:', nuevoExamen.materia, nuevoExamen.fecha, nuevoExamen.hora_inicio);
+    
+    for (const uidSeleccionado of etsSeleccionados) {
+        const examenSeleccionado = etsDataById.get(uidSeleccionado);
+        if (!examenSeleccionado) continue;
+        
+        console.log('Comparando con:', examenSeleccionado.materia, examenSeleccionado.fecha, examenSeleccionado.hora_inicio);
+        
+        // Solo comparar si es el mismo día
+        const fechaNueva = (nuevoExamen.fecha || '').trim();
+        const fechaSeleccionada = (examenSeleccionado.fecha || '').trim();
+        
+        if (fechaNueva === fechaSeleccionada && fechaNueva !== '') {
+            const inicioNuevo = convertirHoraAMinutos(nuevoExamen.hora_inicio);
+            const finNuevo = convertirHoraAMinutos(nuevoExamen.hora_fin);
+            const inicioSeleccionado = convertirHoraAMinutos(examenSeleccionado.hora_inicio);
+            const finSeleccionado = convertirHoraAMinutos(examenSeleccionado.hora_fin);
+            
+            console.log('Horas:', { inicioNuevo, finNuevo, inicioSeleccionado, finSeleccionado });
+            
+            if (inicioNuevo === null || finNuevo === null || inicioSeleccionado === null || finSeleccionado === null) {
+                console.warn('Error al parsear horas');
+                continue;
+            }
+            
+            // Verificar si hay traslape: inicio1 < fin2 AND fin1 > inicio2
+            const hayTraslape = inicioNuevo < finSeleccionado && finNuevo > inicioSeleccionado;
+            console.log('¿Hay traslape?', hayTraslape);
+            
+            if (hayTraslape) {
+                return {
+                    traslapa: true,
+                    materiaPrimera: examenSeleccionado.materia,
+                    horaConflicto: `${examenSeleccionado.hora_inicio} - ${examenSeleccionado.hora_fin}`,
+                    fecha: fechaSeleccionada
+                };
+            }
+        }
+    }
+    
+    console.log('No hay traslape');
+    return null;
+}
+
+// FUNCIONES PARA SIDEBAR
+function toggleEtsSeleccion(uid) {
+    const checkbox = document.querySelector(`input[data-uid="${uid}"]`);
+    const examen = etsDataById.get(uid);
+    
+    if (etsSeleccionados.has(uid)) {
+        etsSeleccionados.delete(uid);
+        if (checkbox) checkbox.checked = false;
+    } else {
+        // Verificar si hay traslape
+        const traslape = detectarTraslape(uid);
+        
+        if (traslape) {
+            // Mostrar alerta roja de conflicto
+            if (checkbox) checkbox.checked = false;
+            Swal.fire({
+                title: '¡Conflicto de horario!',
+                html: `<div style="text-align: left; padding: 15px;">
+                       <p><strong style="color: #dc2626;">Tu materia:</strong><br>
+                       <span style="color: #0f172a; font-size: 16px;">${examen.materia}</span></p>
+                       <p style="margin-top: 15px;"><strong style="color: #0f172a;">Se traslapa con:</strong><br>
+                       <span style="color: #0f172a; font-size: 16px;">${traslape.materiaPrimera}</span></p>
+                       <div style="background: #fef2f2; border-left: 4px solid #dc2626; padding: 12px; margin-top: 15px; border-radius: 4px;">
+                       <p style="margin: 5px 0;"><i class="fas fa-calendar" style="color: #dc2626; margin-right: 8px;"></i><strong>Fecha:</strong> ${traslape.fecha}</p>
+                       <p style="margin: 5px 0;"><i class="fas fa-clock" style="color: #dc2626; margin-right: 8px;"></i><strong>Horario:</strong> ${traslape.horaConflicto}</p>
+                       </div>
+                       </div>`,
+                icon: 'error',
+                confirmButtonText: 'Entendido',
+                confirmButtonColor: '#dc2626',
+                background: '#ffffff',
+                color: '#0f172a',
+                iconColor: '#dc2626',
+                allowOutsideClick: false,
+                didOpen: (modal) => {
+                    const title = modal.querySelector('.swal2-title');
+                    title.innerHTML = '<i class="fas fa-exclamation-circle" style="margin-right: 12px; color: #dc2626; font-size: 32px; vertical-align: middle;"></i>' + title.textContent;
+                }
+            });
+            return;
+        }
+        
+        etsSeleccionados.add(uid);
+        if (checkbox) checkbox.checked = true;
+        Swal.fire({
+            icon: 'success',
+            title: '¡Agregado!',
+            html: `<p style="color: #0f172a; font-size: 16px;"><strong>${examen.materia}</strong></p>
+                   <p style="color: #6b7280; font-size: 14px;">se agregó a tu horario</p>`,
+            timer: 2500,
+            timerProgressBar: true,
+            showConfirmButton: false,
+            toast: true,
+            position: 'top-start',
+            background: '#ecfdf5',
+            color: '#0f172a',
+            iconColor: '#10b981',
+            didOpen: (toast) => {
+                const title = toast.querySelector('.swal2-title');
+                if (title) {
+                    title.innerHTML = '<i class="fas fa-check-circle" style="margin-right: 12px; color: #10b981; font-size: 32px; vertical-align: middle;"></i>' + title.textContent;
+                }
+                toast.addEventListener('mouseenter', Swal.stopTimer);
+                toast.addEventListener('mouseleave', Swal.resumeTimer);
+            }
+        });
+    }
+    actualizarSidebar();
+}
+
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    sidebar.classList.toggle('sidebar-open');
+}
+
+function actualizarSidebar() {
+    const contador = document.getElementById('contador-ets');
+    const content = document.getElementById('sidebar-content');
+    const btnHorario = document.getElementById('btn-horario');
+    const btnCalendario = document.getElementById('btn-calendario');
+    const btnLimpiar = document.getElementById('btn-limpiar');
+    
+    contador.textContent = etsSeleccionados.size;
+    
+    if (etsSeleccionados.size === 0) {
+        content.innerHTML = `
+            <div class="sidebar-empty">
+                <i class="fas fa-inbox"></i>
+                <p>Selecciona ETSs para crear tu horario</p>
+            </div>
+        `;
+        btnHorario.disabled = true;
+        btnCalendario.disabled = true;
+        btnLimpiar.disabled = true;
+    } else {
+        let html = '<div class="sidebar-list">';
+        
+        Array.from(etsSeleccionados).forEach(uid => {
+            const examen = etsDataById.get(uid);
+            if (examen) {
+                html += `
+                    <div class="sidebar-item">
+                        <div class="sidebar-item-header">
+                            <strong>${examen.materia}</strong>
+                            <button class="btn-remove" onclick="toggleEtsSeleccion('${uid}')" title="Remover">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="sidebar-item-info">
+                            <span><i class="fas fa-calendar"></i> ${examen.fecha}</span>
+                            <span><i class="fas fa-clock"></i> ${examen.hora_inicio}</span>
+                        </div>
+                    </div>
+                `;
+            }
+        });
+        
+        html += '</div>';
+        content.innerHTML = html;
+        btnHorario.disabled = false;
+        btnCalendario.disabled = false;
+        btnLimpiar.disabled = false;
+    }
+}
+
+function limpiarSeleccion() {
+    etsSeleccionados.clear();
+    document.querySelectorAll('.ets-checkbox').forEach(cb => cb.checked = false);
+    actualizarSidebar();
+}
+
+async function cargarETS() {
+
+    const carrera = document.getElementById("carrera").value;
+    const semestre = document.getElementById("semestre").value;
+    const materia = document.getElementById("materia").value;
+
+    try {
+
+        const respuesta = await fetch(
+            `php/buscar.php?carrera=${carrera}&semestre=${semestre}&materia=${materia}`
+        );
+
+        let datos = await respuesta.json();
+
+        console.log("Datos recibidos:", datos);
+
+        if (!Array.isArray(datos)) datos = [];
+
+        //  orden alfabético seguro
+        datos.sort((a, b) => {
+            const aMat = (a.materia || "").trim();
+            const bMat = (b.materia || "").trim();
+
+            return aMat.localeCompare(bMat, "es", {
+                sensitivity: "base"
+            });
+        });
+
+        document.getElementById("mensaje-inicial").style.display = "none";
+        
+        // Guardar datos y reiniciar paginación
+        datosResultados = datos;
+        paginaActual = 1;
+        
+        mostrarPagina(paginaActual);
+
+    } catch (error) {
+
+        console.error(error);
+
+        document.getElementById("contenedor-resultados").innerHTML = `
+            <div class="sin-resultados">
+                Error al consultar los ETS.
+            </div>
+        `;
+    }
+}
+
+function mostrarPagina(pagina) {
+    if (datosResultados.length === 0) {
+        document.getElementById("contenedor-resultados").innerHTML = `
+            <div class="sin-resultados">
+                No se encontraron ETS.
+            </div>
+        `;
+        return;
+    }
+    
+    const inicio = (pagina - 1) * elementosPorPagina;
+    const fin = inicio + elementosPorPagina;
+    const datosPagina = datosResultados.slice(inicio, fin);
+    
+    let html = "";
+    
+    datosPagina.forEach((examen, index) => {
+        let carrera = (examen.carrera || "").trim().toUpperCase();
+        let claseCarrera = "";
+        const uid = examen.id ? `ets-${examen.id}` : `ets-${carrera}-${index}`;
+        etsDataById.set(uid, examen);
+
+        if (carrera === "ISC") claseCarrera = "isc";
+        else if (carrera === "IIA") claseCarrera = "iia";
+        else if (carrera === "LCD") claseCarrera = "lcd";
+
+        html += `
+            <div class="resultado-card${claseCarrera ? ' ' + claseCarrera : ''}" data-uid="${uid}">
+                <div class="resultado-header">
+                    ${examen.materia}
+                </div>
+                <div class="resultado-subtitle">
+                    ${examen.carrera} · Semestre ${examen.semestre} · ${examen.turno}
+                </div>
+                <div class="resultado-body">
+                    <div class="dato"><i class="fas fa-graduation-cap"></i><strong>Carrera</strong><span>${examen.carrera}</span></div>
+                    <div class="dato"><i class="fas fa-layer-group"></i><strong>Semestre</strong><span>${examen.semestre}</span></div>
+                    <div class="dato"><i class="fas fa-calendar-day"></i><strong>Fecha</strong><span>${examen.fecha}</span></div>
+                    <div class="dato"><i class="fas fa-clock"></i><strong>Horario</strong><span>${examen.hora_inicio} - ${examen.hora_fin}</span></div>
+                    <div class="dato"><i class="fas fa-door-open"></i><strong>Salón</strong><span>${examen.salon}</span></div>
+                    <div class="dato"><i class="fas fa-building"></i><strong>Edificio</strong><span>${examen.edificio}</span></div>
+                    <div class="dato"><i class="fas fa-user-tie"></i><strong>Profesor</strong><span>${examen.profesor_evaluador}</span></div>
+                </div>
+                <div class="resultado-actions">
+                    <button class="btn-secundario" onclick="exportarPDF('${uid}')">
+                        <i class="fas fa-file-pdf"></i> Exportar PDF
+                    </button>
+                    <button class="btn-secundario" onclick="agregarCalendario('${uid}')">
+                        <i class="fas fa-calendar-plus"></i> Agregar al calendario
+                    </button>
+                </div>
+                <div class="resultado-card-checkbox">
+                    <input type="checkbox" class="ets-checkbox" data-uid="${uid}" onchange="toggleEtsSeleccion('${uid}')">
+                    <label>Agregar a mi horario</label>
+                </div>
+            </div>
+        `;
+    });
+    
+    // Agregar controles de paginación
+    const totalPaginas = Math.ceil(datosResultados.length / elementosPorPagina);
+    if (totalPaginas > 1) {
+        html += `
+            <div class="paginacion">
+                <button class="btn-pagina" onclick="cambiarPagina(${pagina - 1})" ${pagina === 1 ? 'disabled' : ''}>
+                    <i class="fas fa-chevron-left"></i> Anterior
+                </button>
+                <span class="info-pagina">Página ${pagina} de ${totalPaginas}</span>
+                <button class="btn-pagina" onclick="cambiarPagina(${pagina + 1})" ${pagina === totalPaginas ? 'disabled' : ''}>
+                    Siguiente <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        `;
+    }
+    
+    document.getElementById("contenedor-resultados").innerHTML = html;
+}
+
+function cambiarPagina(nuevaPagina) {
+    const totalPaginas = Math.ceil(datosResultados.length / elementosPorPagina);
+    if (nuevaPagina >= 1 && nuevaPagina <= totalPaginas) {
+        paginaActual = nuevaPagina;
+        mostrarPagina(paginaActual);
+        document.querySelector('.resultados').scrollIntoView({ behavior: 'smooth' });
+    }
+}
+
+/*  CARGA AUTOMÁTICA AL ENTRAR */
+document.addEventListener("DOMContentLoaded", () => {
+    cargarETS();
+});
+
+/*  BOTÓN BUSCAR */
+document.getElementById("buscar").addEventListener("click", cargarETS);
+
+/* ENTER EN MATERIA */
+document.getElementById("materia").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+        cargarETS();
+    }
+});
+
+function getJsPDF() {
+    if (window.jspdf && window.jspdf.jsPDF) {
+        window.jsPDF = window.jsPDF || window.jspdf.jsPDF;
+        return window.jspdf.jsPDF;
+    }
+    if (window.jsPDF) return window.jsPDF;
+    return null;
+}
+
+function loadImageDataUrl(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            resolve({
+                dataUrl: canvas.toDataURL('image/png'),
+                width: img.naturalWidth,
+                height: img.naturalHeight
+            });
+        };
+        img.onerror = reject;
+        img.src = src;
+    });
+}
+
+async function exportarPDF(uid) {
+    console.log('exportarPDF clickeado', uid);
+    const examen = etsDataById.get(uid);
+    if (!examen) {
+        console.error('No se encontró ETS para UID:', uid);
+        return;
+    }
+
+    const jsPDF = getJsPDF();
+    if (!jsPDF) {
+        alert('No se pudo cargar la librería jsPDF. Revisa tu conexión o carga de scripts.');
+        return;
+    }
+
+    const doc = new jsPDF({ unit: 'pt', format: 'letter' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const left = 40;
+    const contentWidth = pageWidth - left * 2;
+
+    const headerHeight = 110;
+    doc.setFillColor(7, 40, 99);
+    doc.rect(0, 0, pageWidth, headerHeight, 'F');
+
+    // Agregar logos
+    try {
+        const ipnLogo = await loadImageDataUrl('img/ipn.png');
+        const escomLogo = await loadImageDataUrl('img/escom.png');
+        
+        const logoSize = 30;
+        const ipnWidth = logoSize * (ipnLogo.width / ipnLogo.height);
+        const escomWidth = logoSize * (escomLogo.width / escomLogo.height);
+        
+        // Logo IPN a la izquierda
+        doc.addImage(ipnLogo.dataUrl, 'PNG', left, 20, ipnWidth, logoSize);
+        
+        // Logo ESCOM a la derecha
+        doc.addImage(escomLogo.dataUrl, 'PNG', pageWidth - left - escomWidth, 20, escomWidth, logoSize);
+    } catch (err) {
+        console.warn('No se pudieron cargar los logos para el PDF:', err);
+    }
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(24);
+    doc.text('Reporte de ETS', pageWidth / 2, 70, { align: 'center' });
+    doc.setFontSize(10);
+    doc.text('Instituto Politécnico Nacional · Escuela Superior de Cómputo', pageWidth / 2, 88, { align: 'center' });
+    doc.setFontSize(9);
+    doc.text(`Generado: ${new Date().toLocaleDateString('es-ES')}`, pageWidth / 2, 104, { align: 'center' });
+
+    const headerBottom = headerHeight + 10;
+    doc.setFillColor(236, 246, 255);
+    doc.roundedRect(left, headerBottom, contentWidth, 50, 10, 10, 'F');
+    doc.setFontSize(13);
+    doc.setTextColor(8, 34, 82);
+    doc.text(`Materia: ${examen.materia || 'N/A'}`, pageWidth / 2, headerBottom + 28, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setTextColor(72, 84, 100);
+    doc.text(`Turno: ${examen.turno || 'N/A'}`, pageWidth / 2, headerBottom + 44, { align: 'center' });
+
+    const boxTop = 180;
+    const cardHeight = 270;
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(left, boxTop, contentWidth, cardHeight, 14, 14, 'F');
+    doc.setDrawColor(216, 227, 255);
+    doc.roundedRect(left, boxTop, contentWidth, cardHeight, 14, 14, 'S');
+
+    doc.setFontSize(12);
+    doc.setTextColor(8, 34, 82);
+    doc.text('Información del examen', left + 16, boxTop + 28);
+    doc.setFontSize(9);
+    doc.setTextColor(95, 103, 120);
+    doc.text('Resumen organizado con los datos más relevantes del ETS.', left + 16, boxTop + 42);
+
+    const items = [
+        ['Carrera', examen.carrera],
+        ['Semestre', examen.semestre],
+        ['Fecha', examen.fecha],
+        ['Horario', `${examen.hora_inicio || 'N/A'} - ${examen.hora_fin || 'N/A'}`],
+        ['Salón', examen.salon],
+        ['Edificio', examen.edificio],
+        ['Profesor', examen.profesor_evaluador],
+        ['Estado', examen.estado || 'Confirmado']
+    ];
+
+    const iconMap = {
+        Carrera: '•',
+        Semestre: '•',
+        Fecha: '•',
+        Horario: '•',
+        Salón: '•',
+        Edificio: '•',
+        Profesor: '•',
+        Estado: '•'
+    };
+
+    const columnGap = 16;
+    const columnWidth = (contentWidth - columnGap) / 2;
+    const labelIndent = 14;
+    const valueIndent = 64;
+    const baseY = boxTop + 70;
+    let y = baseY;
+
+    const rows = [];
+    for (let i = 0; i < items.length; i += 2) {
+        rows.push([items[i], items[i + 1]]);
+    }
+
+    rows.forEach(([leftItem, rightItem]) => {
+        const leftX = left + 16;
+        const rightX = left + 16 + columnWidth + columnGap;
+
+        const leftLabel = `${iconMap[leftItem[0]]} ${leftItem[0]}:`;
+        const leftValue = leftItem[1] || 'N/A';
+        const rightLabel = rightItem ? `${iconMap[rightItem[0]]} ${rightItem[0]}:` : '';
+        const rightValue = rightItem ? rightItem[1] || 'N/A' : '';
+
+        doc.setFontSize(9);
+        doc.setTextColor(55, 65, 81);
+        doc.text(leftLabel, leftX, y);
+        doc.setFontSize(10);
+        doc.setTextColor(17, 24, 39);
+        const leftLines = doc.splitTextToSize(leftValue, columnWidth - valueIndent - 8);
+        doc.text(leftLines, leftX + valueIndent, y);
+
+        if (rightItem) {
+            doc.setFontSize(9);
+            doc.setTextColor(55, 65, 81);
+            doc.text(rightLabel, rightX, y);
+            doc.setFontSize(10);
+            doc.setTextColor(17, 24, 39);
+            const rightLines = doc.splitTextToSize(rightValue, columnWidth - valueIndent - 8);
+            doc.text(rightLines, rightX + valueIndent, y);
+            y += Math.max(leftLines.length, rightLines.length) * 14 + 12;
+        } else {
+            y += leftLines.length * 14 + 12;
+        }
+    });
+
+    const footerTop = boxTop + cardHeight - 32;
+    doc.setFontSize(9);
+    doc.setTextColor(109, 118, 141);
+    doc.text('Este PDF contiene los datos principales del ETS para tu equipo.', left + 16, footerTop);
+    doc.text('Guárdalo o compártelo fácilmente.', left + 16, footerTop + 14);
+
+    const fileName = `ETS-${(examen.materia || 'detalle').replace(/\s+/g, '_')}.pdf`;
+    doc.save(fileName);
+}
+
+function formatIcsDate(fecha, hora) {
+    if (!fecha) return '';
+    const dateParts = fecha.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+    if (!dateParts) return '';
+    let [, d, m, y] = dateParts;
+    if (y.length === 2) y = '20' + y;
+    d = d.padStart(2, '0');
+    m = m.padStart(2, '0');
+
+    if (!hora) return `${y}${m}${d}`;
+    const timeParts = hora.match(/(\d{1,2}):(\d{2})/);
+    if (!timeParts) return `${y}${m}${d}`;
+    const [, hh, mm] = timeParts;
+    return `${y}${m}${d}T${hh.padStart(2, '0')}${mm}00`;
+}
+
+function agregarCalendario(uid) {
+    console.log('agregarCalendario clickeado', uid);
+    const examen = etsDataById.get(uid);
+    if (!examen) {
+        console.error('No se encontró ETS para UID:', uid);
+        return;
+    }
+
+    const dtStart = formatIcsDate(examen.fecha, examen.hora_inicio);
+    const dtEnd = formatIcsDate(examen.fecha, examen.hora_fin) || dtStart;
+    const description = `Carrera: ${examen.carrera || 'N/A'}\\nSemestre: ${examen.semestre || 'N/A'}\\nProfesor: ${examen.profesor_evaluador || 'N/A'}`;
+    const ics = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//MKI//ETS Calendar//ES',
+        'BEGIN:VEVENT',
+        `UID:${Date.now()}-${uid}@mki`,
+        `DTSTAMP:${dtStart}`,
+        `DTSTART:${dtStart}`,
+        `DTEND:${dtEnd}`,
+        `SUMMARY:ETS ${examen.materia || 'Evento'}`,
+        `DESCRIPTION:${description}`,
+        `LOCATION:${examen.salon || ''} ${examen.edificio || ''}`,
+        'END:VEVENT',
+        'END:VCALENDAR'
+    ].join('\r\n');
+
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `ETS-${(examen.materia || 'evento').replace(/\s+/g, '_')}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function agregarTodoAlCalendario() {
+    if (etsSeleccionados.size === 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Sin selecciones',
+            html: '<p style="color: #6b7280; font-size: 14px;">Por favor selecciona al menos un ETS</p>',
+            timer: 2500,
+            timerProgressBar: true,
+            showConfirmButton: false,
+            toast: true,
+            position: 'top-end',
+            background: '#fffbeb',
+            color: '#0f172a',
+            iconColor: '#f59e0b',
+            didOpen: (modal) => {
+                const title = modal.querySelector('.swal2-title');
+                if (title) {
+                    title.innerHTML = '<i class="fas fa-info-circle" style="margin-right: 12px; color: #f59e0b; font-size: 32px; vertical-align: middle;"></i>' + title.textContent;
+                }
+            }
+        });
+        return;
+    }
+    
+    const examenes = Array.from(etsSeleccionados)
+        .map(uid => etsDataById.get(uid))
+        .filter(e => e)
+        .sort((a, b) => {
+            const dateA = new Date(a.fecha);
+            const dateB = new Date(b.fecha);
+            if (dateA.getTime() !== dateB.getTime()) return dateA - dateB;
+            const timeA = a.hora_inicio.split(':')[0];
+            const timeB = b.hora_inicio.split(':')[0];
+            return parseInt(timeA) - parseInt(timeB);
+        });
+    
+    const events = [];
+    examenes.forEach((examen, index) => {
+        const dtStart = formatIcsDate(examen.fecha, examen.hora_inicio);
+        const dtEnd = formatIcsDate(examen.fecha, examen.hora_fin) || dtStart;
+        const description = `Carrera: ${examen.carrera || 'N/A'}\\nSemestre: ${examen.semestre || 'N/A'}\\nProfesor: ${examen.profesor_evaluador || 'N/A'}\\nSalón: ${examen.salon || 'N/A'}`;
+        
+        events.push(
+            'BEGIN:VEVENT',
+            `UID:${Date.now()}-ets${index}@mki`,
+            `DTSTAMP:${dtStart}`,
+            `DTSTART:${dtStart}`,
+            `DTEND:${dtEnd}`,
+            `SUMMARY:ETS ${examen.materia || 'Evento'}`,
+            `DESCRIPTION:${description}`,
+            `LOCATION:${examen.salon || ''} ${examen.edificio || ''}`,
+            'END:VEVENT'
+        );
+    });
+    
+    const ics = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//MKI//ETS Calendar//ES',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        ...events,
+        'END:VCALENDAR'
+    ].join('\r\n');
+
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Mi-Horario-ETS-${new Date().toISOString().split('T')[0]}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    Swal.fire({
+        icon: 'success',
+        title: '¡Éxito!',
+        html: '<p style="color: #0f172a; font-size: 14px;">ETS agregados al calendario</p>',
+        timer: 2500,
+        timerProgressBar: true,
+        showConfirmButton: false,
+        toast: true,
+        position: 'top-end',
+        background: '#ecfdf5',
+        color: '#0f172a',
+        iconColor: '#10b981',
+        didOpen: (modal) => {
+            const title = modal.querySelector('.swal2-title');
+            if (title) {
+                title.innerHTML = '<i class="fas fa-calendar-check" style="margin-right: 12px; color: #10b981; font-size: 32px; vertical-align: middle;"></i>' + title.textContent;
+            }
+        }
+    });
+}
+
+async function generarHorarioPDF() {
+    if (etsSeleccionados.size === 0) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Sin selecciones',
+            html: '<p style="color: #6b7280; font-size: 14px;">Por favor selecciona al menos un ETS</p>',
+            timer: 2500,
+            timerProgressBar: true,
+            showConfirmButton: false,
+            toast: true,
+            position: 'top-end',
+            background: '#fffbeb',
+            color: '#0f172a',
+            iconColor: '#f59e0b',
+            didOpen: (modal) => {
+                const title = modal.querySelector('.swal2-title');
+                if (title) {
+                    title.innerHTML = '<i class="fas fa-info-circle" style="margin-right: 12px; color: #f59e0b; font-size: 32px; vertical-align: middle;"></i>' + title.textContent;
+                }
+            }
+        });
+        return;
+    }
+    
+    const jsPDF = getJsPDF();
+    if (!jsPDF) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Error',
+            html: '<p style="color: #6b7280; font-size: 14px;">No se pudo cargar la librería jsPDF. Revisa tu conexión.</p>',
+            confirmButtonColor: '#dc2626',
+            background: '#fef2f2',
+            color: '#0f172a',
+            iconColor: '#dc2626',
+            didOpen: (modal) => {
+                const title = modal.querySelector('.swal2-title');
+                if (title) {
+                    title.innerHTML = '<i class="fas fa-exclamation-circle" style="margin-right: 12px; color: #dc2626; font-size: 32px; vertical-align: middle;"></i>' + title.textContent;
+                }
+            }
+        });
+        return;
+    }
+    
+    const doc = new jsPDF({ unit: 'mm', format: 'letter' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 10;
+    const contentWidth = pageWidth - (margin * 2);
+    
+    // Header
+    doc.setFillColor(0, 44, 111);
+    doc.rect(0, 0, pageWidth, 35, 'F');
+    
+    // Agregar logos
+    try {
+        const ipnLogo = await loadImageDataUrl('img/ipn.png');
+        const escomLogo = await loadImageDataUrl('img/escom.png');
+        
+        const logoHeight = 20;
+        const ipnWidth = logoHeight * (ipnLogo.width / ipnLogo.height);
+        const escomWidth = logoHeight * (escomLogo.width / escomLogo.height);
+        
+        // Logo IPN a la izquierda
+        doc.addImage(ipnLogo.dataUrl, 'PNG', margin + 4, 7, ipnWidth, logoHeight);
+        
+        // Logo ESCOM a la derecha
+        doc.addImage(escomLogo.dataUrl, 'PNG', pageWidth - margin - 4 - escomWidth, 7, escomWidth, logoHeight);
+    } catch (err) {
+        console.warn('No se pudieron cargar los logos para el PDF:', err);
+    }
+    
+    // Texto
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.text('Mi Horario de ETS', pageWidth / 2, 20, { align: 'center' });
+    doc.setFontSize(9);
+    doc.text('ESCOM - Instituto Politécnico Nacional', pageWidth / 2, 28, { align: 'center' });
+    
+    let yPosition = 42;
+    const examenes = Array.from(etsSeleccionados)
+        .map(uid => etsDataById.get(uid))
+        .filter(e => e)
+        .sort((a, b) => {
+            const dateA = new Date(a.fecha);
+            const dateB = new Date(b.fecha);
+            if (dateA.getTime() !== dateB.getTime()) return dateA - dateB;
+            const timeA = a.hora_inicio.split(':')[0];
+            const timeB = b.hora_inicio.split(':')[0];
+            return parseInt(timeA) - parseInt(timeB);
+        });
+    
+    examenes.forEach((examen, index) => {
+        if (yPosition > pageHeight - 25) {
+            doc.addPage();
+            yPosition = margin;
+        }
+        
+        // Card background
+        doc.setFillColor(240, 245, 255);
+        doc.rect(margin, yPosition, contentWidth, 50, 'F');
+        doc.setDrawColor(100, 181, 246);
+        doc.setLineWidth(0.5);
+        doc.rect(margin, yPosition, contentWidth, 50);
+        
+        // Left accent bar
+        doc.setFillColor(100, 181, 246);
+        doc.rect(margin, yPosition, 2, 50, 'F');
+        
+        // Content
+        doc.setFontSize(12);
+        doc.setTextColor(0, 39, 60);
+        doc.text(`${index + 1}. ${examen.materia}`, margin + 6, yPosition + 8);
+        
+        doc.setFontSize(9);
+        doc.setTextColor(80, 90, 110);
+        doc.text(`Carrera: ${examen.carrera}`, margin + 6, yPosition + 16);
+        doc.text(`Fecha: ${examen.fecha}`, margin + 80, yPosition + 16);
+        doc.text(`Horario: ${examen.hora_inicio} - ${examen.hora_fin}`, margin + 6, yPosition + 24);
+        doc.text(`Salón: ${examen.salon} (Edificio ${examen.edificio})`, margin + 80, yPosition + 24);
+        doc.text(`Profesor: ${examen.profesor_evaluador}`, margin + 6, yPosition + 32);
+        doc.text(`Turno: ${examen.turno}`, margin + 80, yPosition + 32);
+        
+        yPosition += 55;
+    });
+    
+    // Footer
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text(`Generado: ${new Date().toLocaleDateString('es-ES')} a las ${new Date().toLocaleTimeString('es-ES')}`, margin, pageHeight - 8);
+    doc.text(`Total de ETS: ${examenes.length}`, pageWidth / 2, pageHeight - 8, { align: 'center' });
+    
+    doc.save('Horario-ETS.pdf');
+}
+
+
+</script>
+
+<!-- LOADER MODERNO -->
+<script src="loader.js"></script>
+
+<footer class="footer">
+    <div class="footer-content">
+        <div class="footer-section">
+            <h4>Acerca de</h4>
+            <p>Sistema de consulta de Exámenes a Título de Suficiencia para estudiantes de la ESCOM.</p>
+        </div>
+        
+        <div class="footer-section">
+            <h4>Enlaces útiles</h4>
+            <ul>
+                <li><a href="https://www.escom.ipn.mx/" target="_blank">Portal ESCOM</a></li>
+                <li><a href="https://www.saes.escom.ipn.mx/default.aspx" target="_blank">Sistema de estudiantes</a></li>
+                <li><a href="https://www.ipn.mx/assets/files/website/docs/inicio/calendarioipn-escolarizada.pdf" target="_blank">Calendario académico</a></li>
+                <li><a href="admin/login.html">Panel de administración</a></li>
+            </ul>
+        </div>
+        
+        <div class="footer-section">
+            <h4>Contacto</h4>
+            <p>📧 <a href="mailto:sub_academica_escom@ipn.mx">sub_academica_escom@ipn.mx</a></p>
+            <p>📱 <a href="tel:+525557296000">55 5729 6000</a></p>
+        </div>
+        
+        <div class="footer-section">
+            <h4>Instituciones</h4>
+            <div class="footer-logos">
+                <img src="img/ipn.png" alt="IPN" class="footer-logo">
+                <img src="img/escom.png" alt="ESCOM" class="footer-logo">
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer-bottom">
+        <p>&copy; 2026 Instituto Politécnico Nacional · Escuela Superior de Cómputo. Todos los derechos reservados.</p>
+    </div>
+</footer>
+
+</body>
+</html>
